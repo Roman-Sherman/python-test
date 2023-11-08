@@ -58,6 +58,7 @@ class Prediction(Resource):
     The following keys are available:
     - `get`: A URL to fetch the prediction.
     - `cancel`: A URL to cancel the prediction.
+    - `stream`: A URL to a server-sent event stream of the prediction output. For more information, see https://replicate.com/docs/streaming.
     """
 
     @dataclass
