@@ -272,11 +272,11 @@ class RetryTransport(httpx.AsyncBaseTransport, httpx.BaseTransport):
             attempts_made += 1
             remaining_attempts -= 1
 
-    async def aclose(self) -> None:
-        await self._wrapped_transport.aclose()  # type: ignore
-
     def close(self) -> None:
         self._wrapped_transport.close()  # type: ignore
+
+    async def aclose(self) -> None:
+        await self._wrapped_transport.aclose()  # type: ignore
 
 
 def _build_httpx_client(
