@@ -1,3 +1,4 @@
+import asyncio
 import os
 import random
 import time
@@ -268,7 +269,7 @@ class RetryTransport(httpx.AsyncBaseTransport, httpx.BaseTransport):
             response.close()
 
             sleep_for = self._calculate_sleep(attempts_made, response.headers)
-            time.sleep(sleep_for)
+            await asyncio.sleep(sleep_for)
 
             response = await self._wrapped_transport.handle_async_request(request)  # type: ignore
 
