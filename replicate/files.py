@@ -2,7 +2,7 @@ import base64
 import io
 import mimetypes
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -119,7 +119,7 @@ class Files(Namespace):
         return _json_to_file(resp.json())
 
 
-def _file_content(file: io.IOBase) -> tuple[str, io.IOBase, str]:
+def _file_content(file: io.IOBase) -> Tuple[str, io.IOBase, str]:
     """Get the file content details including name, file object and content type."""
 
     name = getattr(file, "name", "output")
