@@ -50,6 +50,7 @@ class ServerSentEvent(pydantic.BaseModel):  # type: ignore
     data: str
     id: str
     retry: Optional[int]
+    prediction_id: Optional[str]
 
     def __str__(self) -> str:
         if self.event == ServerSentEvent.EventType.OUTPUT:
@@ -64,9 +65,11 @@ class EventSource:
     """
 
     response: "httpx.Response"
+    prediction_id: Optional[str]
 
-    def __init__(self, response: "httpx.Response") -> None:
+    def __init__(self, response: "httpx.Response", prediction_id: Optional[str] = None) -> None:
         self.response = response
+        self.prediction_id = prediction_id
         content_type, _, _ = response.headers["content-type"].partition(";")
         if content_type != "text/event-stream":
             raise ValueError(
@@ -83,6 +86,7 @@ class EventSource:
         data: List[str] = []
         last_event_id: Optional[str] = None
         retry: Optional[int] = None
+        prediction_id: Optional[str] = None
 
         def decode(self, line: str) -> Optional[ServerSentEvent]:
             """
@@ -102,6 +106,7 @@ class EventSource:
                     data="\n".join(self.data),
                     id=self.last_event_id,
                     retry=self.retry,
+                    prediction_id=self.prediction_id,
                 )
 
                 self.event = None
@@ -134,6 +139,7 @@ class EventSource:
 
     def __iter__(self) -> Iterator[ServerSentEvent]:
         decoder = EventSource.Decoder()
+        decoder.prediction_id = self.prediction_id
         for line in self.response.iter_lines():
             line = line.rstrip("\n")
             sse = decoder.decode(line)
@@ -148,6 +154,7 @@ class EventSource:
 
     async def __aiter__(self) -> AsyncIterator[ServerSentEvent]:
         decoder = EventSource.Decoder()
+        decoder.prediction_id = self.prediction_id
         async for line in self.response.aiter_lines():
             line = line.rstrip("\n")
             sse = decoder.decode(line)
@@ -198,7 +205,7 @@ def stream(
     headers["Cache-Control"] = "no-store"
 
     with client._client.stream("GET", url, headers=headers) as response:
-        yield from EventSource(response)
+        yield from EventSource(response, prediction_id=prediction.id)
 
 
 async def async_stream(
