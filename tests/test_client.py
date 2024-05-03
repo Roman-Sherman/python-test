@@ -1,290 +1,111 @@
-from collections.abc import Iterable
+import os
+from unittest import mock
 
+import httpx
 import pytest
-import responses
-from responses import matchers
-
-from replicate.__about__ import __version__
-from replicate.client import Client
-from replicate.exceptions import ModelError
-
-from .factories import (
-    mock_version_get,
-    mock_version_get_with_iterator_output,
-    mock_version_get_with_iterator_output_backwards_compatibility_0_3_8,
-    mock_version_get_with_list_output,
-)
+import respx
 
 
-@responses.activate
-def test_client_sets_authorization_token_and_user_agent_headers():
-    client = Client(api_token="abc123")
-    model = client.models.get("test/model")
+@pytest.mark.asyncio
+async def test_authorization_when_setting_environ_after_import():
+    import replicate
 
-    responses.get(
-        "https://api.replicate.com/v1/models/test/model/versions",
-        match=[
-            matchers.header_matcher({"Authorization": "Token abc123"}),
-            matchers.header_matcher({"User-Agent": f"replicate-python@{__version__}"}),
-        ],
-        json={"results": []},
+    router = respx.Router()
+    router.route(
+        method="GET",
+        url="https://api.replicate.com/",
+        headers={"Authorization": "Bearer test-set-after-import"},
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={},
+        )
     )
 
-    model.versions.list()
+    token = "test-set-after-import"  # noqa: S105
+
+    with mock.patch.dict(
+        os.environ,
+        {"REPLICATE_API_TOKEN": token},
+    ):
+        client = replicate.Client(transport=httpx.MockTransport(router.handler))
+        resp = client._request("GET", "/")
+        assert resp.status_code == 200
 
 
-@responses.activate
-def test_run():
-    mock_version_get(owner="test", model="model", version="v1")
-    responses.post(
-        "https://api.replicate.com/v1/predictions",
-        match=[
-            matchers.json_params_matcher({"version": "v1", "input": {"text": "world"}})
-        ],
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"text": "world"},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
-    responses.get(
-        "https://api.replicate.com/v1/predictions/p1",
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "succeeded",
-            "input": {"text": "world"},
-            "output": "hello world",
-            "error": None,
-            "logs": "",
-        },
+@pytest.mark.asyncio
+async def test_client_error_handling():
+    import replicate
+    from replicate.exceptions import ReplicateError
+
+    router = respx.Router()
+    router.route(
+        method="GET",
+        url="https://api.replicate.com/",
+        headers={"Authorization": "Bearer test-client-error"},
+    ).mock(
+        return_value=httpx.Response(
+            400,
+            json={"detail": "Client error occurred"},
+        )
     )
 
-    client = Client(api_token="abc123")
-    assert client.run("test/model:v1", input={"text": "world"}) == "hello world"
+    token = "test-client-error"  # noqa: S105
+
+    with mock.patch.dict(os.environ, {"REPLICATE_API_TOKEN": token}):
+        client = replicate.Client(transport=httpx.MockTransport(router.handler))
+        with pytest.raises(ReplicateError) as exc_info:
+            client._request("GET", "/")
+        assert "status: 400" in str(exc_info.value)
+        assert "detail: Client error occurred" in str(exc_info.value)
 
 
-@responses.activate
-def test_run_with_iterator():
-    mock_version_get_with_iterator_output(owner="test", model="model", version="v1")
-    responses.post(
-        "https://api.replicate.com/v1/predictions",
-        match=[
-            matchers.json_params_matcher({"version": "v1", "input": {"text": "world"}})
-        ],
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"text": "world"},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
-    responses.get(
-        "https://api.replicate.com/v1/predictions/p1",
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "succeeded",
-            "input": {"text": "world"},
-            "output": ["hello world"],
-            "error": None,
-            "logs": "",
-        },
+@pytest.mark.asyncio
+async def test_server_error_handling():
+    import replicate
+    from replicate.exceptions import ReplicateError
+
+    router = respx.Router()
+    router.route(
+        method="GET",
+        url="https://api.replicate.com/",
+        headers={"Authorization": "Bearer test-server-error"},
+    ).mock(
+        return_value=httpx.Response(
+            500,
+            json={"detail": "Server error occurred"},
+        )
     )
 
-    client = Client(api_token="abc123")
-    output = client.run("test/model:v1", input={"text": "world"})
-    assert isinstance(output, Iterable)
-    assert list(output) == ["hello world"]
+    token = "test-server-error"  # noqa: S105
+
+    with mock.patch.dict(os.environ, {"REPLICATE_API_TOKEN": token}):
+        client = replicate.Client(transport=httpx.MockTransport(router.handler))
+        with pytest.raises(ReplicateError) as exc_info:
+            client._request("GET", "/")
+        assert "status: 500" in str(exc_info.value)
+        assert "detail: Server error occurred" in str(exc_info.value)
 
 
-@responses.activate
-def test_run_with_list():
-    mock_version_get_with_list_output(owner="test", model="model", version="v1")
-    responses.post(
-        "https://api.replicate.com/v1/predictions",
-        match=[
-            matchers.json_params_matcher({"version": "v1", "input": {"text": "world"}})
-        ],
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"text": "world"},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
-    responses.get(
-        "https://api.replicate.com/v1/predictions/p1",
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "succeeded",
-            "input": {"text": "world"},
-            "output": ["hello world"],
-            "error": None,
-            "logs": "",
-        },
+def test_custom_headers_are_applied():
+    import replicate
+    from replicate.exceptions import ReplicateError
+
+    custom_headers = {"Custom-Header": "CustomValue"}
+
+    def mock_send(request: httpx.Request, **kwargs) -> httpx.Response:
+        assert "Custom-Header" in request.headers
+        assert request.headers["Custom-Header"] == "CustomValue"
+
+        return httpx.Response(401, json={})
+
+    client = replicate.Client(
+        api_token="dummy_token",
+        headers=custom_headers,
+        transport=httpx.MockTransport(mock_send),
     )
 
-    client = Client(api_token="abc123")
-    output = client.run("test/model:v1", input={"text": "world"})
-    assert isinstance(output, list)
-    assert output == ["hello world"]
-
-
-@responses.activate
-def test_run_with_iterator_backwards_compatibility_cog_0_3_8():
-    mock_version_get_with_iterator_output_backwards_compatibility_0_3_8(
-        owner="test", model="model", version="v1"
-    )
-    responses.post(
-        "https://api.replicate.com/v1/predictions",
-        match=[
-            matchers.json_params_matcher({"version": "v1", "input": {"text": "world"}})
-        ],
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"text": "world"},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
-    responses.get(
-        "https://api.replicate.com/v1/predictions/p1",
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "succeeded",
-            "input": {"text": "world"},
-            "output": ["hello world"],
-            "error": None,
-            "logs": "",
-        },
-    )
-
-    client = Client(api_token="abc123")
-    output = client.run("test/model:v1", input={"text": "world"})
-    assert isinstance(output, Iterable)
-    assert list(output) == ["hello world"]
-
-
-@responses.activate
-def test_predict_with_iterator_with_failed_prediction():
-    mock_version_get_with_iterator_output(owner="test", model="model", version="v1")
-    responses.post(
-        "https://api.replicate.com/v1/predictions",
-        match=[
-            matchers.json_params_matcher({"version": "v1", "input": {"text": "world"}})
-        ],
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"text": "world"},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
-    responses.get(
-        "https://api.replicate.com/v1/predictions/p1",
-        json={
-            "id": "p1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/predictions/p1",
-                "cancel": "https://api.replicate.com/v1/predictions/p1/cancel",
-            },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "failed",
-            "input": {"text": "world"},
-            "output": None,
-            "error": "it broke",
-            "logs": "",
-        },
-    )
-
-    client = Client(api_token="abc123")
-    output = client.run("test/model:v1", input={"text": "world"})
-    assert isinstance(output, Iterable)
-    with pytest.raises(ModelError) as excinfo:
-        list(output)
-    assert "it broke" in str(excinfo.value)
+    try:
+        client.accounts.current()
+    except ReplicateError:
+        pass

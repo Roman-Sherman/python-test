@@ -1,175 +1,190 @@
-import responses
-from responses import matchers
+import pytest
 
-from .factories import create_client, create_version
+import replicate
+from replicate.exceptions import ReplicateException
+
+input_images_url = "https://replicate.delivery/pbxt/JMV5OrEWpBAC5gO8rre0tPOyJIOkaXvG0TWfVJ9b4zhLeEUY/data.zip"
 
 
-@responses.activate
-def test_create_works_with_webhooks():
-    client = create_client()
-    version = create_version(client)
-
-    rsp = responses.post(
-        "https://api.replicate.com/v1/models/owner/model/versions/v1/trainings",
-        match=[
-            matchers.json_params_matcher(
-                {
-                    "input": {"data": "..."},
-                    "destination": "new_owner/new_model",
-                    "webhook": "https://example.com/webhook",
-                    "webhook_events_filter": ["completed"],
-                }
-            ),
-        ],
-        json={
-            "id": "t1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/trainings/t1",
-                "cancel": "https://api.replicate.com/v1/trainings/t1/cancel",
+@pytest.mark.vcr("trainings-create.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_create(async_flag, mock_replicate_api_token):
+    if async_flag:
+        training = await replicate.trainings.async_create(
+            model="stability-ai/sdxl",
+            version="a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            input={
+                "input_images": input_images_url,
+                "use_face_detection_instead": True,
             },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"data": "..."},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
-
-    client.trainings.create(
-        version=f"owner/model:{version.id}",
-        input={"data": "..."},
-        destination="new_owner/new_model",
-        webhook="https://example.com/webhook",
-        webhook_events_filter=["completed"],
-    )
-
-    assert rsp.call_count == 1
-
-
-@responses.activate
-def test_cancel():
-    client = create_client()
-    version = create_version(client)
-
-    responses.post(
-        "https://api.replicate.com/v1/models/owner/model/versions/v1/trainings",
-        match=[
-            matchers.json_params_matcher(
-                {
-                    "input": {"data": "..."},
-                    "destination": "new_owner/new_model",
-                    "webhook": "https://example.com/webhook",
-                    "webhook_events_filter": ["completed"],
-                }
-            ),
-        ],
-        json={
-            "id": "t1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/trainings/t1",
-                "cancel": "https://api.replicate.com/v1/trainings/t1/cancel",
+            destination="replicate/dreambooth-sdxl",
+        )
+    else:
+        training = replicate.trainings.create(
+            model="stability-ai/sdxl",
+            version="a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            input={
+                "input_images": input_images_url,
+                "use_face_detection_instead": True,
             },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"data": "..."},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
+            destination="replicate/dreambooth-sdxl",
+        )
 
-    training = client.trainings.create(
-        version=f"owner/model:{version.id}",
-        input={"data": "..."},
-        destination="new_owner/new_model",
-        webhook="https://example.com/webhook",
-        webhook_events_filter=["completed"],
-    )
-
-    rsp = responses.post("https://api.replicate.com/v1/trainings/t1/cancel", json={})
-    training.cancel()
-    assert rsp.call_count == 1
+    assert training.id is not None
+    assert training.status == "starting"
 
 
-@responses.activate
-def test_async_timings():
-    client = create_client()
-    version = create_version(client)
-
-    responses.post(
-        "https://api.replicate.com/v1/models/owner/model/versions/v1/trainings",
-        match=[
-            matchers.json_params_matcher(
-                {
-                    "input": {"data": "..."},
-                    "destination": "new_owner/new_model",
-                    "webhook": "https://example.com/webhook",
-                    "webhook_events_filter": ["completed"],
-                }
-            ),
-        ],
-        json={
-            "id": "t1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/trainings/t1",
-                "cancel": "https://api.replicate.com/v1/trainings/t1/cancel",
+@pytest.mark.vcr("trainings-create.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_create_with_named_version_argument(
+    async_flag, mock_replicate_api_token
+):
+    if async_flag:
+        # The overload with a model version identifier is soft-deprecated
+        # and not supported in the async version.
+        return
+    else:
+        training = replicate.trainings.create(
+            version="stability-ai/sdxl:a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            input={
+                "input_images": input_images_url,
+                "use_face_detection_instead": True,
             },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "source": "api",
-            "status": "processing",
-            "input": {"data": "..."},
-            "output": None,
-            "error": None,
-            "logs": "",
-        },
-    )
+            destination="replicate/dreambooth-sdxl",
+        )
 
-    responses.get(
-        "https://api.replicate.com/v1/trainings/t1",
-        json={
-            "id": "t1",
-            "version": "v1",
-            "urls": {
-                "get": "https://api.replicate.com/v1/trainings/t1",
-                "cancel": "https://api.replicate.com/v1/trainings/t1/cancel",
+    assert training.id is not None
+    assert training.status == "starting"
+
+
+@pytest.mark.vcr("trainings-create.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_create_with_positional_argument(
+    async_flag, mock_replicate_api_token
+):
+    if async_flag:
+        # The overload with positional arguments is soft-deprecated
+        # and not supported in the async version.
+        return
+    else:
+        training = replicate.trainings.create(
+            "stability-ai/sdxl:a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            {
+                "input_images": input_images_url,
+                "use_face_detection_instead": True,
             },
-            "created_at": "2022-04-26T20:00:40.658234Z",
-            "completed_at": "2022-04-26T20:02:27.648305Z",
-            "source": "api",
-            "status": "succeeded",
-            "input": {"data": "..."},
-            "output": {
-                "weights": "https://delivery.replicate.com/weights.tgz",
-                "version": "v2",
-            },
-            "error": None,
-            "logs": "",
-        },
-    )
+            "replicate/dreambooth-sdxl",
+        )
 
-    training = client.trainings.create(
-        version=f"owner/model:{version.id}",
-        input={"data": "..."},
-        destination="new_owner/new_model",
-        webhook="https://example.com/webhook",
-        webhook_events_filter=["completed"],
-    )
+        assert training.id is not None
+        assert training.status == "starting"
 
-    assert training.created_at == "2022-04-26T20:00:40.658234Z"
-    assert training.completed_at is None
-    assert training.output is None
 
-    # trainings don't have a wait method, so simulate it by calling reload
-    training.reload()
-    assert training.created_at == "2022-04-26T20:00:40.658234Z"
-    assert training.completed_at == "2022-04-26T20:02:27.648305Z"
-    assert training.output["weights"] == "https://delivery.replicate.com/weights.tgz"
-    assert training.output["version"] == "v2"
+@pytest.mark.vcr("trainings-create__invalid-destination.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_create_with_invalid_destination(
+    async_flag, mock_replicate_api_token
+):
+    with pytest.raises(ReplicateException):
+        if async_flag:
+            await replicate.trainings.async_create(
+                model="stability-ai/sdxl",
+                version="a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+                input={
+                    "input_images": input_images_url,
+                    "use_face_detection_instead": True,
+                },
+                destination="<invalid>",
+            )
+        else:
+            replicate.trainings.create(
+                model="stability-ai/sdxl",
+                version="a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+                input={
+                    "input_images": input_images_url,
+                },
+                destination="<invalid>",
+            )
+
+
+@pytest.mark.vcr("trainings-get.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_get(async_flag, mock_replicate_api_token):
+    id = "medrnz3bm5dd6ultvad2tejrte"
+
+    if async_flag:
+        training = await replicate.trainings.async_get(id)
+    else:
+        training = replicate.trainings.get(id)
+
+    assert training.id == id
+    assert training.status == "processing"
+
+
+@pytest.mark.vcr("trainings-cancel.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_cancel(async_flag, mock_replicate_api_token):
+    input = {
+        "input_images": input_images_url,
+        "use_face_detection_instead": True,
+    }
+
+    destination = "replicate/dreambooth-sdxl"
+
+    if async_flag:
+        training = await replicate.trainings.async_create(
+            model="stability-ai/sdxl",
+            version="a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            input=input,
+            destination=destination,
+        )
+
+        assert training.status == "starting"
+
+        training = replicate.trainings.cancel(training.id)
+        assert training.status == "canceled"
+    else:
+        training = replicate.trainings.create(
+            version="stability-ai/sdxl:a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            destination=destination,
+            input=input,
+        )
+
+        assert training.status == "starting"
+
+        training = replicate.trainings.cancel(training.id)
+        assert training.status == "canceled"
+
+
+@pytest.mark.vcr("trainings-cancel.yaml")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_flag", [True, False])
+async def test_trainings_cancel_instance_method(async_flag, mock_replicate_api_token):
+    input = {
+        "input_images": input_images_url,
+        "use_face_detection_instead": True,
+    }
+
+    destination = "replicate/dreambooth-sdxl"
+
+    if async_flag:
+        # The cancel instance method is soft-deprecated,
+        # and not supported in the async version.
+        return
+    else:
+        training = replicate.trainings.create(
+            version="stability-ai/sdxl:a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5",
+            destination=destination,
+            input=input,
+        )
+
+        assert training.status == "starting"
+
+        training.cancel()
+        assert training.status == "canceled"

@@ -6,6 +6,7 @@ This is a Python client for [Replicate](https://replicate.com). It lets you run 
 >
 >  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1K91q4p-OhL96FHBAVLsv9FlwFdu6Pn3c)
 
+
 ## Install
 
 ```sh
@@ -26,7 +27,7 @@ We recommend not adding the token directly to your source code, because you don'
 
 ## Run a model
 
-Create a new Python file and add the following code:
+Create a new Python file and add the following code, replacing the model identifier and input with your own:
 
 ```python
 >>> import replicate
@@ -38,16 +39,93 @@ Create a new Python file and add the following code:
 ['https://replicate.com/api/models/stability-ai/stable-diffusion/files/50fcac81-865d-499e-81ac-49de0cb79264/out-0.png']
 ```
 
-Some models, like [methexis-inc/img2prompt](https://replicate.com/methexis-inc/img2prompt), receive images as inputs. To pass a file as an input, use a file handle or URL:
+Some models, particularly language models, may not require the version string. Refer to the API documentation for the model for more on the specifics:
+
+```python
+replicate.run(
+    "meta/meta-llama-3-70b-instruct",
+    input={
+        "prompt": "Can you write a poem about open source machine learning?",
+        "system_prompt": "You are a helpful, respectful and honest assistant.",
+    },
+)
+```
+
+Some models, like [andreasjansson/blip-2](https://replicate.com/andreasjansson/blip-2), have files as inputs.
+To run a model that takes a file input,
+pass a URL to a publicly accessible file.
+Or, for smaller files (<10MB), you can pass a file handle directly.
 
 ```python
 >>> output = replicate.run(
-        "salesforce/blip:2e1dddc8621f72155f24cf2e0adbde548458d3cab9f00c0139eea840d0ac4746",
-        input={"image": open("path/to/mystery.jpg", "rb")},
+        "andreasjansson/blip-2:f677695e5e89f8b236e52ecd1d3f01beb44c34606419bcc19345e046d8f786f9",
+        input={ "image": open("path/to/mystery.jpg") }
     )
 
 "an astronaut riding a horse"
 ```
+
+> [!NOTE]
+> You can also use the Replicate client asynchronously by prepending `async_` to the method name. 
+> 
+> Here's an example of how to run several predictions concurrently and wait for them all to complete:
+>
+> ```python
+> import asyncio
+> import replicate
+> 
+> # https://replicate.com/stability-ai/sdxl
+> model_version = "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b"
+> prompts = [
+>     f"A chariot pulled by a team of {count} rainbow unicorns"
+>     for count in ["two", "four", "six", "eight"]
+> ]
+>
+> async with asyncio.TaskGroup() as tg:
+>     tasks = [
+>         tg.create_task(replicate.async_run(model_version, input={"prompt": prompt}))
+>         for prompt in prompts
+>     ]
+>
+> results = await asyncio.gather(*tasks)
+> print(results)
+> ```
+
+## Run a model and stream its output
+
+Replicate’s API supports server-sent event streams (SSEs) for language models. 
+Use the `stream` method to consume tokens as they're produced by the model.
+
+```python
+import replicate
+
+for event in replicate.stream(
+    "meta/meta-llama-3-70b-instruct",
+    input={
+        "prompt": "Please write a haiku about llamas.",
+    },
+):
+    print(str(event), end="")
+```
+
+You can also stream the output of a prediction you create.
+This is helpful when you want the ID of the prediction separate from its output.
+
+```python
+version = "02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3"
+prediction = replicate.predictions.create(
+    version=version,
+    input={"prompt": "Please write a haiku about llamas."},
+    stream=True,
+)
+
+for event in prediction.stream():
+    print(str(event), end="")
+```
+
+For more information, see
+["Streaming output"](https://replicate.com/docs/streaming) in Replicate's docs.
+
 
 ## Run a model in the background
 
@@ -93,8 +171,8 @@ iteration: 30, render:loss: -1.3994140625
 You can run a model and get a webhook when it completes, instead of waiting for it to finish:
 
 ```python
-model = replicate.models.get("kvfrans/clipdraw")
-version = model.versions.get("5797a99edc939ea0e9242d5e8c9cb3bc7d125b1eac21bda852e5cb79ede2cd9b")
+model = replicate.models.get("ai-forever/kandinsky-2.2")
+version = model.versions.get("ea1addaab376f4dc227f5368bbd8eff901820fd1cc14ed8cad63b29249e9d463")
 prediction = replicate.predictions.create(
     version=version,
     input={"prompt":"Watercolor painting of an underwater submarine"},
@@ -102,6 +180,8 @@ prediction = replicate.predictions.create(
     webhook_events_filter=["completed"]
 )
 ```
+
+For details on receiving webhooks, see [replicate.com/docs/webhooks](https://replicate.com/docs/webhooks).
 
 ## Compose models into a pipeline
 
@@ -159,19 +239,122 @@ replicate.predictions.list()
 # [<Prediction: 8b0ba5ab4d85>, <Prediction: 494900564e8c>]
 ```
 
+Lists of predictions are paginated. You can get the next page of predictions by passing the `next` property as an argument to the `list` method:
+
+```python
+page1 = replicate.predictions.list()
+
+if page1.next:
+    page2 = replicate.predictions.list(page1.next)
+```
+
 ## Load output files
 
 Output files are returned as HTTPS URLs. You can load an output file as a buffer:
 
 ```python
 import replicate
+from PIL import Image
 from urllib.request import urlretrieve
 
-model = replicate.models.get("stability-ai/stable-diffusion")
-version = model.versions.get("27b93a2413e7f36cd83da926f3656280b2931564ff050bf9575f1fdf9bcd7478")
-out = version.predict(prompt="wavy colorful abstract patterns, cgsociety")
+out = replicate.run(
+    "stability-ai/stable-diffusion:27b93a2413e7f36cd83da926f3656280b2931564ff050bf9575f1fdf9bcd7478",
+    input={"prompt": "wavy colorful abstract patterns, oceans"}
+    )
+
 urlretrieve(out[0], "/tmp/out.png")
 background = Image.open("/tmp/out.png")
+```
+
+## List models
+
+You can the models you've created:
+
+```python
+replicate.models.list()
+```
+
+Lists of models are paginated. You can get the next page of models by passing the `next` property as an argument to the `list` method, or you can use the `paginate` method to fetch pages automatically.
+
+```python
+# Automatic pagination using `replicate.paginate` (recommended)
+models = []
+for page in replicate.paginate(replicate.models.list):
+    models.extend(page.results)
+    if len(models) > 100:
+        break
+
+# Manual pagination using `next` cursors
+page = replicate.models.list()
+while page:
+    models.extend(page.results)
+    if len(models) > 100:
+          break
+    page = replicate.models.list(page.next) if page.next else None
+```
+
+You can also find collections of featured models on Replicate:
+
+```python
+>>> collections = [collection for page in replicate.paginate(replicate.collections.list) for collection in page]
+>>> collections[0].slug
+"vision-models"
+>>> collections[0].description
+"Multimodal large language models with vision capabilities like object detection and optical character recognition (OCR)"
+
+>>> replicate.collections.get("text-to-image").models
+[<Model: stability-ai/sdxl>, ...]
+```
+
+## Create a model
+
+You can create a model for a user or organization
+with a given name, visibility, and hardware SKU:
+
+```python
+import replicate
+
+model = replicate.models.create(
+    owner="your-username",
+    name="my-model",
+    visibility="public",
+    hardware="gpu-a40-large"
+)
+```
+
+Here's how to list of all the available hardware for running models on Replicate:
+
+```python
+>>> [hw.sku for hw in replicate.hardware.list()]
+['cpu', 'gpu-t4', 'gpu-a40-small', 'gpu-a40-large']
+```
+
+## Fine-tune a model
+
+Use the [training API](https://replicate.com/docs/fine-tuning) 
+to fine-tune models to make them better at a particular task. 
+To see what **language models** currently support fine-tuning, 
+check out Replicate's [collection of trainable language models](https://replicate.com/collections/trainable-language-models).
+
+If you're looking to fine-tune **image models**, 
+check out Replicate's [guide to fine-tuning image models](https://replicate.com/docs/guides/fine-tune-an-image-model).
+
+Here's how to fine-tune a model on Replicate:
+
+```python
+training = replicate.trainings.create(
+    model="stability-ai/sdxl",
+    version="39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+    input={
+      "input_images": "https://my-domain/training-images.zip",
+      "token_string": "TOK",
+      "caption_prefix": "a photo of TOK",
+      "max_train_steps": 1000,
+      "use_face_detection_instead": False
+    },
+    # You need to create a model on Replicate that will be the destination for the trained version.
+    destination="your-username/model-name"
+)
 ```
 
 ## Development

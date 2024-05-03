@@ -6,31 +6,35 @@ from typing import Any, Callable
 try:
     import numpy as np  # type: ignore
 
-    has_numpy = True
+    HAS_NUMPY = True
 except ImportError:
-    has_numpy = False
+    HAS_NUMPY = False
 
 
+# pylint: disable=too-many-return-statements
 def encode_json(
-    obj: Any, upload_file: Callable[[io.IOBase], str]  # noqa: ANN401
+    obj: Any,  # noqa: ANN401
+    upload_file: Callable[[io.IOBase], str],
 ) -> Any:  # noqa: ANN401
     """
-    Returns a JSON-compatible version of the object. Effectively the same thing as cog.json.encode_json.
+    Return a JSON-compatible version of the object.
     """
+    # Effectively the same thing as cog.json.encode_json.
+
     if isinstance(obj, dict):
         return {key: encode_json(value, upload_file) for key, value in obj.items()}
     if isinstance(obj, (list, set, frozenset, GeneratorType, tuple)):
         return [encode_json(value, upload_file) for value in obj]
     if isinstance(obj, Path):
-        with obj.open("rb") as f:
-            return upload_file(f)
+        with obj.open("rb") as file:
+            return upload_file(file)
     if isinstance(obj, io.IOBase):
         return upload_file(obj)
-    if has_numpy:
-        if isinstance(obj, np.integer):
+    if HAS_NUMPY:
+        if isinstance(obj, np.integer):  # type: ignore
             return int(obj)
-        if isinstance(obj, np.floating):
+        if isinstance(obj, np.floating):  # type: ignore
             return float(obj)
-        if isinstance(obj, np.ndarray):
+        if isinstance(obj, np.ndarray):  # type: ignore
             return obj.tolist()
     return obj
